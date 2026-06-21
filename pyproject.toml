@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "deltex"
-version = '1.3.0'
+version = '1.3.2'
 description = "Official Python client for Deltex — edge-native SQL database"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -17,7 +17,7 @@ deltex = "deltex.cli:main"
 
 [project.urls]
 Homepage = "https://deltex.dev"
-Repository = "https://github.com/deltex/deltex-python"
+Repository = "https://github.com/trydeltex/deltex-python"
 
 [tool.hatch.build.targets.wheel]
 packages = ["deltex"]

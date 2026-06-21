@@ -5,7 +5,10 @@ Deltex asyncio client.
 from __future__ import annotations
 
 import os
+import json
 import asyncio
+import urllib.request
+import urllib.error
 from typing import Any, Dict, List, Optional, Sequence
 
 from .client import (
@@ -44,7 +47,7 @@ class AsyncClient:
         self,
         api_key: Optional[str] = None,
         endpoint: Optional[str] = None,
-        write_mode: str = "edge",
+        write_mode: str = "sync",
         timeout: float = 30.0,
         max_retries: int = 3,
         tag: Optional[str] = None,
@@ -93,7 +96,12 @@ class AsyncClient:
 
     async def transaction(self, fn):
         """
-        Execute an async transaction.
+        Execute an atomic transaction via Deltex's /transaction endpoint.
+
+        Mutating statements (``execute``/``execute_raw``) are collected and sent
+        atomically in a single round-trip; reads (``query``/``query_one``) execute
+        live. If ``fn`` raises before returning, no statements are sent — the
+        transaction is effectively rolled back.
 
         Example:
             async def do_transfer(tx):
@@ -102,18 +110,47 @@ class AsyncClient:
 
             await db.transaction(do_transfer)
         """
-        sync_client = self.with_write_mode("sync")
-        await sync_client.execute("BEGIN TRANSACTION")
-        try:
-            result = await fn(self)
-            await sync_client.execute("COMMIT")
-            return result
-        except Exception:
+        statements: list = []
+        outer = self
+
+        class CollectingClient:
+            async def query(self_inner, sql: str, params: Sequence[Param] = ()) -> List[Row]:
+                return await outer.query(sql, params)
+
+            async def query_one(self_inner, sql: str, params: Sequence[Param] = ()) -> Optional[Row]:
+                return await outer.query_one(sql, params)
+
+            async def execute(self_inner, sql: str, params: Sequence[Param] = ()) -> int:
+                statements.append(_bind(sql, params))
+                return 0
+
+            async def execute_raw(self_inner, sql: str, params: Sequence[Param] = ()) -> QueryResult:
+                statements.append(_bind(sql, params))
+                return QueryResult(rows=[], columns=[], rows_affected=0)
+
+        tx = CollectingClient()
+        user_result = await fn(tx)
+
+        if not statements:
+            return user_result
+
+        tx_url = self._url.replace("/v1/query", "/v1/transaction")
+        body = json.dumps({"statements": statements, "isolation": "SERIALIZABLE"}).encode()
+
+        def _send() -> None:
+            req = urllib.request.Request(tx_url, data=body, method="POST", headers=self._headers)
             try:
-                await sync_client.execute("ROLLBACK")
-            except Exception:
-                pass
-            raise
+                with urllib.request.urlopen(req, timeout=self._timeout) as resp:
+                    data = json.loads(resp.read())
+            except urllib.error.HTTPError as e:
+                data = json.loads(e.read())
+                raise DeltexError(data.get("message", str(e)), e.code, "; ".join(statements))
+            if data.get("success") is False:
+                raise DeltexError(data.get("message", "Transaction failed"), 500, "; ".join(statements))
+
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, _send)
+        return user_result
 
     def with_write_mode(self, mode: str) -> "AsyncClient":
         c = AsyncClient.__new__(AsyncClient)
@@ -160,7 +197,7 @@ class AsyncClient:
 def async_connect(
     api_key: Optional[str] = None,
     endpoint: Optional[str] = None,
-    write_mode: str = "edge",
+    write_mode: str = "sync",
     timeout: float = 30.0,
     max_retries: int = 3,
     tag: Optional[str] = None,

@@ -39,7 +39,7 @@ ANSI_DIM    = "\033[2m"  if sys.stdout.isatty() else ""
 ANSI_RESET  = "\033[0m"  if sys.stdout.isatty() else ""
 
 
-def sql(query: str, write_mode: str = "edge") -> Dict[str, Any]:
+def sql(query: str, write_mode: str = "sync") -> Dict[str, Any]:
     if not API_KEY:
         print(f"{ANSI_RED}Error: DELTEX_API_KEY not set{ANSI_RESET}", file=sys.stderr)
         sys.exit(1)
@@ -403,7 +403,7 @@ def cmd_signup(args: argparse.Namespace) -> None:
         sys.exit(1)
 
 
-def sql_request(stmt: str, write_mode: str = "edge") -> Dict[str, Any]:
+def sql_request(stmt: str, write_mode: str = "sync") -> Dict[str, Any]:
     """Internal helper for CLI SQL execution."""
     req = urllib.request.Request(
         f"{ENDPOINT}/v1/query",
@@ -594,7 +594,7 @@ Examples:
     p_query = subparsers.add_parser("query", help="Execute SQL and show results")
     p_query.add_argument("sql", help="SQL statement")
     p_query.add_argument("--json", action="store_true", help="Output JSON")
-    p_query.add_argument("--write-mode", default="edge", choices=["sync", "async", "edge"])
+    p_query.add_argument("--write-mode", default="sync", choices=["sync", "async", "edge"])
     p_query.set_defaults(func=cmd_query)
 
     # tables
@@ -611,7 +611,7 @@ Examples:
     # exec
     p_exec = subparsers.add_parser("exec", help="Execute a mutating SQL statement")
     p_exec.add_argument("sql", help="SQL statement")
-    p_exec.add_argument("--write-mode", default="edge", choices=["sync", "async", "edge"])
+    p_exec.add_argument("--write-mode", default="sync", choices=["sync", "async", "edge"])
     p_exec.set_defaults(func=cmd_exec)
 
     # health

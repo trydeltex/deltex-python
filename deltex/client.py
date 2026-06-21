@@ -13,7 +13,7 @@ import urllib.error
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence
 
-__version__ = "1.3.0"
+__version__ = "1.3.2"
 SDK_VERSION = __version__
 
 
@@ -181,7 +181,7 @@ class Client:
         self,
         api_key: Optional[str] = None,
         endpoint: Optional[str] = None,
-        write_mode: str = "edge",
+        write_mode: str = "sync",
         timeout: float = 30.0,
         max_retries: int = 3,
         tag: Optional[str] = None,
@@ -273,6 +273,31 @@ class Client:
 
         return user_result
 
+    def batch(self, statements: "list[str]") -> int:
+        """Atomically execute an array of SQL statements in ONE round-trip.
+
+        The fastest way to apply many writes: the engine coalesces them into a
+        single durable KV commit, so N statements cost ~one write (O(1)) instead
+        of N separate round-trips (~N x 300ms). Prefer this — or a single
+        multi-row INSERT — over looping execute() for bulk work.
+
+        Runs as a transaction (all-or-nothing). Returns total rows affected.
+        """
+        if not statements:
+            return 0
+        tx_url = self._url.replace("/v1/query", "/v1/transaction")
+        body = json.dumps({"statements": statements, "isolation": "SERIALIZABLE"}).encode()
+        req = urllib.request.Request(tx_url, data=body, method="POST", headers=self._headers)
+        try:
+            with urllib.request.urlopen(req, timeout=self._timeout) as resp:
+                data = json.loads(resp.read())
+        except urllib.error.HTTPError as e:
+            data = json.loads(e.read())
+            raise DeltexError(data.get("message", str(e)), e.code, "; ".join(statements))
+        if data.get("success") is False:
+            raise DeltexError(data.get("message", "Batch failed"), 500, "; ".join(statements))
+        return int(data.get("affected_rows") or 0)
+
     # ── Deltex-specific ───────────────────────────────────────────────────────
 
     def with_write_mode(self, mode: str) -> "Client":
@@ -327,7 +352,7 @@ class Client:
 def connect(
     api_key: Optional[str] = None,
     endpoint: Optional[str] = None,
-    write_mode: str = "edge",
+    write_mode: str = "sync",
     timeout: float = 30.0,
     max_retries: int = 3,
     tag: Optional[str] = None,
@@ -338,7 +363,7 @@ def connect(
     Args:
         api_key:     Bearer token (default: DELTEX_API_KEY env var)
         endpoint:    Engine URL (default: DELTEX_ENDPOINT or https://db.deltex.dev)
-        write_mode:  "edge" | "sync" | "async"  (default: "edge")
+        write_mode:  "sync" | "edge" | "async"  (default: "sync", durable)
         timeout:     Request timeout in seconds (default: 30)
         max_retries: Auto-retry on 429 (default: 3)
         tag:         X-Query-Tag for all requests

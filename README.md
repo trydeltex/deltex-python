@@ -31,13 +31,13 @@ print(result.execution_ms)   # server-side execution time
 
 ## API
 
-### `deltex.connect(api_key=None, endpoint=None, write_mode="edge", ...)`
+### `deltex.connect(api_key=None, endpoint=None, write_mode="sync", ...)`
 
 | Param | Default | Description |
 |-------|---------|-------------|
 | `api_key` | `DELTEX_API_KEY` env | Bearer token |
 | `endpoint` | `DELTEX_ENDPOINT` or `https://db.deltex.dev` | Engine URL |
-| `write_mode` | `"edge"` | `"edge"` / `"sync"` / `"async"` |
+| `write_mode` | `"sync"` | `"sync"` / `"edge"` / `"async"` |
 | `timeout` | `30.0` | Request timeout (seconds) |
 | `max_retries` | `3` | Auto-retry on 429 |
 | `tag` | `None` | X-Query-Tag for analytics |
@@ -51,6 +51,7 @@ db.execute(sql, params=[])     → int  (rows affected)
 db.execute_raw(sql, params=[]) → QueryResult
 
 db.transaction(fn)             # BEGIN → fn(tx) → COMMIT
+db.batch(statements)           # atomic multi-statement, one round-trip → int
 
 db.with_write_mode("sync")     → Client  (per-client write mode)
 db.strong                      → Client  (X-Consistency: strong)
@@ -82,6 +83,23 @@ def transfer(tx):
 db.transaction(transfer)
 ```
 
+## Batch — fastest bulk write
+
+`batch()` applies a list of SQL statements in **one round-trip**, committed
+atomically, and returns total rows affected:
+
+```python
+n = db.batch([
+    "INSERT INTO products (name, price) VALUES ('Apple', 0.99)",
+    "INSERT INTO products (name, price) VALUES ('Banana', 0.59)",
+])  # n == 2
+```
+
+Looping `execute` makes one durable commit per statement. `batch()` (and a
+single multi-row `INSERT`) coalesce them into one commit — O(1) instead of O(N)
+— so it's far faster for bulk writes. `batch()` takes raw SQL (no binding) — for
+untrusted values, build statements safely or use `transaction`.
+
 ## CLI
 
 ```bash
@@ -97,11 +115,11 @@ deltex bench --samples 30
 
 ## Write Modes
 
-| Mode | Latency | Use when |
-|------|---------|----------|
-| `edge` (default) | ~10ms | Normal writes, ASIA/AUS PoPs |
-| `sync` | ~350ms | Critical data, financial |
-| `async` | ~5ms | High-volume telemetry |
+| Mode | Use when |
+|------|----------|
+| `sync` (default) | Everything by default; durable, never loses an acked write |
+| `edge` | Caches, sessions, idempotent upserts — eventual durability |
+| `async` | High-volume telemetry, fire-and-forget |
 
 ## Error handling
 
@@ -128,14 +146,15 @@ MIT
 ### Error handling
 
 ```python
-from deltex import DeltexClient, RateLimitError, DeltexError
+import time
+from deltex import connect, RateLimitError, DeltexError
 
-db = DeltexClient()
+db = connect()
 try:
-    result = db.query("SELECT * FROM users WHERE id = $1", 42)
+    result = db.query("SELECT * FROM users WHERE id = $1", [42])
 except RateLimitError as e:
     time.sleep(e.retry_after)
-    result = db.query("SELECT * FROM users WHERE id = $1", 42)
+    result = db.query("SELECT * FROM users WHERE id = $1", [42])
 except DeltexError as e:
     print(f"Query failed: {e}")
     raise
@@ -144,11 +163,11 @@ except DeltexError as e:
 ### Async client (non-blocking)
 
 ```python
-from deltex.async_client import AsyncDeltexClient
+import deltex
 
 async def main():
-    db = AsyncDeltexClient()
-    rows = await db.query("SELECT * FROM products WHERE price < $1", 50.0)
+    db = deltex.async_connect()
+    rows = await db.query("SELECT * FROM products WHERE price < $1", [50.0])
     for row in rows:
         print(row["name"], row["price"])
 ```
@@ -173,4 +192,4 @@ deltex keys revoke --id key_id_here
 
 ## SDK Version
 
-`v1.3.0` — see [CHANGELOG.md](../../CHANGELOG.md) for history.
+`v1.3.2` — see [CHANGELOG.md](../../CHANGELOG.md) for history.
