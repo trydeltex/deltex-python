@@ -192,4 +192,4 @@ deltex keys revoke --id key_id_here
 
 ## SDK Version
 
-`v1.3.2` — see [CHANGELOG.md](../../CHANGELOG.md) for history.
+`v1.3.3` — see [CHANGELOG.md](../../CHANGELOG.md) for history.

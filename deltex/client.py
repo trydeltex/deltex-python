@@ -13,7 +13,7 @@ import urllib.error
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence
 
-__version__ = "1.3.2"
+__version__ = "1.3.3"
 SDK_VERSION = __version__
 
 

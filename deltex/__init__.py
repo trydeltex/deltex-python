@@ -23,7 +23,7 @@ Usage:
 from .client import connect, Client, DeltexError, RateLimitError, QueryResult
 from .async_client import async_connect, AsyncClient
 
-__version__ = "1.3.2"
+__version__ = "1.3.3"
 __all__ = [
     "connect",
     "async_connect",
